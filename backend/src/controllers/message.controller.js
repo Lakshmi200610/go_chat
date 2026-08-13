@@ -61,9 +61,14 @@ export const sendMessage = async (req, res) => {
     await newMessage.save();
 
     const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMessage);
-    }
+    
+    // Emit to receiver's personal room for smooth multi-device delivery
+    io.to(receiverId.toString()).emit("newMessage", newMessage);
+    
+    // Fallback for current go_chat architecture if needed
+    // if (receiverSocketId) {
+    //   io.to(receiverSocketId).emit("newMessage", newMessage);
+    // }
 
     res.status(201).json(newMessage);
   } catch (error) {
