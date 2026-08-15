@@ -6,12 +6,15 @@ export const generateToken = (userId, res) => {
     expiresIn: "7d",
   });
 
+  const isProduction = env.NODE_ENV === "production";
+
   res.cookie("jwt", token, {
-    maxAge: 7 * 24 * 60 * 60 * 1000,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     httpOnly: true,
-    sameSite: "strict",
-    secure: env.NODE_ENV !== "development",
+    sameSite: isProduction ? "none" : "lax",
+    secure: isProduction,
   });
 
   return token;
 };
+

@@ -6,19 +6,26 @@ import LoginPage from "./pages/LoginPage";
 import ProfilePage from "./pages/ProfilePage";
 import SettingsPage from "./pages/SettingsPage";
 
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { useAuthStore } from "./store/useAuthStore";
 import { useThemeStore } from "./store/useThemeStore";
 import { Loader2 } from "lucide-react";
-import { Toaster } from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 
 function App() {
   const { authUser, checkAuth, isCheckingAuth } = useAuthStore();
   const { theme } = useThemeStore();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
     checkAuth();
-  }, [checkAuth]);
+    if (searchParams.get("auth") === "google_success") {
+      toast.success("Signed in with Google successfully!");
+      searchParams.delete("auth");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [checkAuth, searchParams, setSearchParams]);
+
 
   if (isCheckingAuth && !authUser) {
     return (

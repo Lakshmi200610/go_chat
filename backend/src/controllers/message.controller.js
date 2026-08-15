@@ -1,78 +1,71 @@
-import User from "../models/User.js";
-import Message from "../models/Message.js";
-import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSocketId, io } from "../lib/socket.js";
-import { env } from "../lib/env.js";
+import { conversationService } from "../services/conversation.service.js";
+import { messageService } from "../services/message.service.js";
 
+/**
+ * Controller: GET /api/messages/users
+ * Retrieves contacts enriched with conversation metadata.
+ */
 export const getUsersForSidebar = async (req, res) => {
   try {
     const loggedInUserId = req.user._id;
-    const filteredUsers = await User.find({ _id: { $ne: loggedInUserId } }).select("-password");
-    res.status(200).json(filteredUsers);
+    const contacts = await conversationService.getContactsWithConversations(loggedInUserId);
+    res.status(200).json(contacts);
   } catch (error) {
-    console.error("Error in getUsersForSidebar:", error.message);
+    console.error("Error in getUsersForSidebar controller:", error.message);
     res.status(500).json({ message: "Internal server error" });
   }
 };
 
+/**
+ * Controller: GET /api/messages/:id
+ * Supports both cursor-based (?cursor=<timestamp>&limit=30) and offset-based (?page=1&limit=30) pagination.
+ */
 export const getMessages = async (req, res) => {
   try {
-    const { id: userToChatId } = req.params;
+    const { id: targetId } = req.params;
     const myId = req.user._id;
+    const { page, limit, cursor, before } = req.query;
 
-    const messages = await Message.find({
-      $or: [
-        { senderId: myId, receiverId: userToChatId },
-        { senderId: userToChatId, receiverId: myId },
-      ],
+    const result = await messageService.getMessagesHistory({
+      myId,
+      targetId,
+      page,
+      limit,
+      cursor,
+      before,
     });
 
-    res.status(200).json(messages);
+    res.status(200).json(result);
   } catch (error) {
-    console.error("Error in getMessages:", error.message);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error in getMessages controller:", error.message);
+    const status = error.message.includes("Invalid") ? 400 : 500;
+    res.status(status).json({ message: error.message || "Internal server error" });
   }
 };
 
+/**
+ * Controller: POST /api/messages/send/:id
+ * Handles message creation, attachment storage, and real-time dispatch.
+ */
 export const sendMessage = async (req, res) => {
   try {
     const { text, image } = req.body;
-    const { id: receiverId } = req.params;
+    const { id: targetId } = req.params;
     const senderId = req.user._id;
 
-    let imageUrl;
-    if (image) {
-      if (!env.CLOUDINARY_CLOUD_NAME) {
-        console.log("[Cloudinary Mock] Saving base64 message image attachment");
-        imageUrl = image;
-      } else {
-        const uploadResponse = await cloudinary.uploader.upload(image);
-        imageUrl = uploadResponse.secure_url;
-      }
-    }
-
-    const newMessage = new Message({
+    const newMessage = await messageService.sendMessage({
       senderId,
-      receiverId,
+      targetId,
       text,
-      image: imageUrl,
+      image,
     });
-
-    await newMessage.save();
-
-    const receiverSocketId = getReceiverSocketId(receiverId);
-    
-    // Emit to receiver's personal room for smooth multi-device delivery
-    io.to(receiverId.toString()).emit("newMessage", newMessage);
-    
-    // Fallback for current go_chat architecture if needed
-    // if (receiverSocketId) {
-    //   io.to(receiverSocketId).emit("newMessage", newMessage);
-    // }
 
     res.status(201).json(newMessage);
   } catch (error) {
     console.error("Error in sendMessage controller:", error.message);
-    res.status(500).json({ message: "Internal server error" });
+    const status = error.message.includes("must contain") || error.message.includes("Invalid") ? 400 : 500;
+    res.status(status).json({ message: error.message || "Internal server error" });
   }
 };
+
+

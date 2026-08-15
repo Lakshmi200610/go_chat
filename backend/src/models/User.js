@@ -12,15 +12,28 @@ const userSchema = new mongoose.Schema(
     fullName: {
       type: String,
       required: true,
+      trim: true,
     },
     password: {
       type: String,
-      required: true,
+      required: function () {
+        return !this.googleId;
+      },
       minlength: 6,
     },
     profilePic: {
       type: String,
       default: "",
+    },
+    googleId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    authProvider: {
+      type: String,
+      enum: ["local", "google"],
+      default: "local",
     },
   },
   { timestamps: true }

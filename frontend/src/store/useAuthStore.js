@@ -2,8 +2,8 @@ import { create } from "zustand";
 import { axiosInstance } from "../lib/axios.js";
 import toast from "react-hot-toast";
 import { io } from "socket.io-client";
+import { BASE_URL } from "../lib/constants.js";
 
-const BASE_URL = import.meta.env.MODE === "development" ? "http://localhost:3000" : "/";
 
 export const useAuthStore = create((set, get) => ({
   authUser: null,
@@ -93,6 +93,11 @@ export const useAuthStore = create((set, get) => ({
       query: {
         userId: authUser._id,
       },
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: 15,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
     });
     newSocket.connect();
 
@@ -100,6 +105,16 @@ export const useAuthStore = create((set, get) => ({
 
     newSocket.on("getOnlineUsers", (userIds) => {
       set({ onlineUsers: userIds });
+    });
+
+    newSocket.on("reconnect", () => {
+      if (typeof window !== "undefined" && window.__chatStore) {
+        const store = window.__chatStore.getState();
+        store.getUsers?.();
+        if (store.selectedUser?._id) {
+          store.getMessages?.(store.selectedUser._id);
+        }
+      }
     });
   },
 

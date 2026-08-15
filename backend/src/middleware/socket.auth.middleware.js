@@ -8,30 +8,48 @@ const parseCookies = (cookieString) => {
 
   cookieString.split(";").forEach((cookie) => {
     const parts = cookie.split("=");
-    list[parts.shift().trim()] = decodeURI(parts.join("="));
+    const key = parts.shift()?.trim();
+    if (key) {
+      list[key] = decodeURI(parts.join("="));
+    }
   });
 
   return list;
 };
 
+
 export const socketAuth = async (socket, next) => {
   try {
     const cookieHeader = socket.handshake.headers.cookie;
     const cookies = parseCookies(cookieHeader);
-    const token = cookies.jwt;
+    let token = cookies.jwt || socket.handshake.auth?.token;
+
+    // Support Bearer auth in handshake headers
+    if (!token && socket.handshake.headers.authorization) {
+      const parts = socket.handshake.headers.authorization.split(" ");
+      if (parts.length === 2 && parts[0] === "Bearer") {
+        token = parts[1];
+      }
+    }
 
     if (!token) {
-      // Fallback: If cookie is not present (e.g. cross-origin setups or custom testing),
-      // we check if a query parameter is specified.
-      const queryUserId = socket.handshake.query.userId;
-      if (queryUserId && queryUserId !== "undefined") {
-        return next();
+      // In development fallback, if query has token or if userId is passed, verify token
+      const queryToken = socket.handshake.query.token;
+      if (queryToken) {
+        token = queryToken;
+      } else if (env.NODE_ENV === "development" && socket.handshake.query.userId) {
+        // Fallback for dev convenience if cookies are cross-domain, but check DB user
+        const devUser = await User.findById(socket.handshake.query.userId).select("-password");
+        if (devUser) {
+          socket.user = devUser;
+          return next();
+        }
       }
       return next(new Error("Authentication error: Token missing"));
     }
 
     const decoded = jwt.verify(token, env.JWT_SECRET);
-    if (!decoded) {
+    if (!decoded || !decoded.userId) {
       return next(new Error("Authentication error: Invalid token"));
     }
 
@@ -43,7 +61,8 @@ export const socketAuth = async (socket, next) => {
     socket.user = user;
     next();
   } catch (error) {
-    console.error("Socket authentication middleware error:", error);
-    next(new Error("Authentication error: Internal error"));
+    console.error("Socket authentication middleware error:", error.message);
+    next(new Error("Authentication error: Unauthorized"));
   }
 };
+

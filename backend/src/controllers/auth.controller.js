@@ -4,6 +4,7 @@ import { generateToken } from "../lib/utils.js";
 import cloudinary from "../lib/cloudinary.js";
 import { sendWelcomeEmail } from "../emails/emailHandlers.js";
 import { env } from "../lib/env.js";
+import { authService } from "../services/auth.service.js";
 
 export const signup = async (req, res) => {
   const { fullName, email, password } = req.body;
@@ -28,6 +29,7 @@ export const signup = async (req, res) => {
       fullName,
       email,
       password: hashedPassword,
+      authProvider: "local",
     });
 
     // Save first, then generate token (avoid setting cookie before DB confirms)
@@ -67,6 +69,12 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
+    if (!user.password && user.googleId) {
+      return res.status(400).json({
+        message: "This account was registered using Google. Please sign in with Google.",
+      });
+    }
+
     const isPasswordCorrect = await bcrypt.compare(password, user.password);
     if (!isPasswordCorrect) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -86,9 +94,53 @@ export const login = async (req, res) => {
   }
 };
 
+export const googleAuth = (req, res) => {
+  try {
+    if (!env.GOOGLE_CLIENT_ID) {
+      return res.redirect(
+        `${env.CLIENT_URL}/login?error=${encodeURIComponent(
+          "Google OAuth is not configured. Please add GOOGLE_CLIENT_ID to backend/.env"
+        )}`
+      );
+    }
+    const state = Math.random().toString(36).substring(7);
+    const authUrl = authService.getGoogleAuthUrl(state);
+    res.redirect(authUrl);
+  } catch (error) {
+    console.error("Error in googleAuth controller:", error.message);
+    res.redirect(`${env.CLIENT_URL}/login?error=google_auth_failed`);
+  }
+};
+
+export const googleCallback = async (req, res) => {
+  const { code, error } = req.query;
+
+  if (error || !code) {
+    console.error("Google OAuth callback error or user cancellation:", error);
+    return res.redirect(`${env.CLIENT_URL}/login?error=oauth_cancelled`);
+  }
+
+  try {
+    const user = await authService.handleGoogleCallback(code);
+    generateToken(user._id, res);
+    res.redirect(`${env.CLIENT_URL}/?auth=google_success`);
+  } catch (err) {
+    console.error("Error in googleCallback controller:", err.message);
+    res.redirect(
+      `${env.CLIENT_URL}/login?error=${encodeURIComponent(err.message || "oauth_failed")}`
+    );
+  }
+};
+
 export const logout = (req, res) => {
   try {
-    res.cookie("jwt", "", { maxAge: 0 });
+    const isProduction = env.NODE_ENV === "production";
+    res.cookie("jwt", "", {
+      maxAge: 0,
+      httpOnly: true,
+      sameSite: isProduction ? "none" : "lax",
+      secure: isProduction,
+    });
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
     console.error("Error in logout controller:", error.message);
@@ -134,3 +186,4 @@ export const checkAuth = (req, res) => {
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
